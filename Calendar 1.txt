@@ -1,0 +1,782 @@
+/*
+Calendar for Mundana
+Created by Kirsty (https://app.roll20.net/users/1165285/kirsty)
+and sabotaged to an extreme extent by dancodan, also cramed in some swedish here and there..
+Many thanks to Aaron (https://app.roll20.net/users/104025/the-aaron) for his NoteLog script, parts of which I "borrowed"
+API Commands:
+!cal (as Player) - Shows world, date, time, moon, weather and counted days 
+!cal (as GM) - Same as player but includes options to advance the date/time, alter the weather, add a note or view the settings menu.
+!calSet (GM only) - Allows the GM to change the world, date, time display, show/hide days until full moon, adjust day counter or set the start date
+Red Colour: #7E2D40
+*/
+var Calendar = Calendar || (function() {
+    'use strict';
+    var version = '1.0',
+    handoutName = 'Events Log',
+    
+    setDefaults = function() {
+        state.Calendar = {
+            now: {
+                version: '1.0',
+                ordinal: 1,
+                year: 2945,
+                weather: "It is a cool but sunny day.",
+                startdate: "1,Mörkerviste,2945",
+                events: ""
+            },
+        };
+    },
+    
+    checkDefaults = function() {
+        if( state.Calendar.now.version != version ){
+            state.Calendar.now.version = version;
+        }
+        
+        if( ! state.Calendar.now.ordinal){state.Calendar.now.ordinal = 1};
+        if( ! state.Calendar.now.year){state.Calendar.now.year = 2945};
+        if( ! state.Calendar.now.weather){state.Calendar.now.weather = "It is a cool but sunny day."};
+        if( ! state.Calendar.now.timetype){state.Calendar.now.timetype = "OFF"};
+        if( ! state.Calendar.now.startdate){state.Calendar.now.startdate = "1,Mörkerviste,2945"};
+        if( ! state.Calendar.now.startdate){state.Calendar.now.events = ""};
+    },
+    
+    handleInput = function(msg) {
+        var args = msg.content.split(",");
+        if (msg.type !== "api") {return;}
+            
+        if(playerIsGM(msg.playerid)){
+            switch(args[0]) {
+                case '!cal':
+                    calmain();
+                    break;
+                case '!settings':
+                    calmenu();
+                    break;
+                case '!setworld':
+                    state.Calendar.now.world=args[1];
+                    calmenu();
+                    break;
+                case '!startdate':
+                    state.Calendar.now.startdate=args[1]+','+args[2]+','+args[3];
+                    calmenu();
+                    break;
+                case '!setday':
+                    getOrdinal(msg);
+                    weather();
+                    calmenu();
+                    break;
+                case '!setmonth':
+                    getOrdinal(msg);
+                    weather();
+                    calmenu();
+                    break;
+                case '!setyear':
+                    state.Calendar.now.year=args[1];
+                    calmenu();
+                    break;
+                case '!setordinal':
+                    state.Calendar.now.ordinal=args[1];
+                    calmenu();
+                    break;
+                case '!addday':
+                    addday(args[1]);
+                    weather();
+                    calmain();
+                    break;
+                case '!weather':
+                    if(args[1]=='Roll}'){
+                        weather();
+                    }else{
+                        var string = args[1];
+                        for (var i = 2; i < args.length; i++) {
+                            string = string + ", " + args[i];
+                        }
+                        state.Calendar.now.weather = string;
+                    }
+                    calmain();
+                    break;
+                case '!log':
+                    log(msg);
+                    break; 
+                case '!playercal':
+                    showcal(msg);
+                    break;
+            }
+        }else if(args[0]=='!cal'){
+            showcal(msg);
+        }
+    },
+    
+    calstyle = function() {
+        var colour = '#7E2D40';
+        var divstyle = 'style="width: 189px; border: 1px solid black; background-color: #ffffff; padding: 5px; font-size: 12px;"'
+        var astyle1 = 'style="text-align:center; border: 1px solid black; margin: 1px; padding: 2px; background-color: ' + colour + '; border-radius: 4px; box-shadow: 1px 1px 1px #707070; width: 100px;';
+        var astyle2 = 'style="text-align:center; border: 1px solid black; margin: 1px; padding: 2px; background-color: ' + colour + '; border-radius: 4px; box-shadow: 1px 1px 1px #707070; width: 150px;';
+        var tablestyle = '';
+        var arrowstyle = 'style="border: none; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 195px solid ' + colour + '; margin-bottom: 2px; margin-top: 2px;"';
+        var headstyle = 'style="color: ' + colour + '; font-size: 18px; text-align: left; font-variant: small-caps; font-family: Times, serif;"';
+        var substyle = 'style="font-size: 11px; line-height: 13px; margin-top: -3px; font-style: italic;"';
+        var styles = colour + '|' + divstyle + '|' + astyle1 + '|' + astyle2 + '|' + tablestyle + '|' + arrowstyle + '|' + headstyle + '|' + substyle;
+        return styles;
+    },
+
+    calmain = function() {
+        var styles = calstyle().split("|");
+        var colour = styles[0];
+        var divstyle = styles[1];
+        var astyle1 = styles[2];
+        var astyle2 = styles[3];
+        var tablestyle = styles[4];
+        var arrowstyle = styles[5];
+        var headstyle = styles[6];
+        var substyle = styles[7];
+        
+        var world = "Mundana";
+        var moMenu = getMoMenu();
+        var ordinal = state.Calendar.now.ordinal;
+        var nowdate = getDate(ordinal).split(',');
+        var month = nowdate[0];
+        var day = nowdate[1];
+        var moon = getMundanaMoon();
+        var start = state.Calendar.now.startdate.split(',');
+        var startdate = start[1]+' '+start[0]+', '+start[2];
+        
+        sendChat('Kalender', '/w gm <div ' + divstyle + '>' + //--
+            '<div ' + headstyle + '>Kalender</div>' + //--
+            '<div ' + substyle + '>Menu (v.' + state.Calendar.now.version + ')</div>' + //--
+            '<div ' + arrowstyle + '></div>' + //--
+            '<table ' + tablestyle + '>' + //--
+            '<tr><td>World: </td><td>' + world + '</td></tr>' + //--
+            '<tr><td>Date: </td><td>'+ month + ' ' + day + ', ' + state.Calendar.now.year + '</td></tr>' + //--
+            moon + //--
+            '</table>' + //--
+            '<br>Weather: ' + state.Calendar.now.weather + //--
+            '<br><br><div style="text-align:center;"><a ' + astyle2 + '" href="!addday,?{Days to add?|1}">Advance the Date</a></div>' + //--
+            '<div style="text-align:center;"><a ' + astyle2 + '" href="!weather,?{Weather|Roll|Edit,?{Edit Weather}}">Change Weather</a></div>' + //--
+            '<div style="text-align:center;"><a ' + astyle2 + '" href="!log,?{Notes}">Log Day</a></div>' + //--
+            '<div style="text-align:center;"><a ' + astyle2 + '" href="!playercal">Show to Players</a></div>' + //--
+            '<div style="text-align:center;"><a ' + astyle2 + '" href="!settings">Settings</a></div>' + //--
+            '</div>'
+        );
+    },
+
+    calmenu = function() {
+        var styles = calstyle().split("|");
+        var colour = styles[0];
+        var divstyle = styles[1];
+        var astyle1 = styles[2];
+        var astyle2 = styles[3];
+        var tablestyle = styles[4];
+        var arrowstyle = styles[5];
+        var headstyle = styles[6];
+        var substyle = styles[7];
+        
+        var world = "Mundana";
+        var moMenu = getMoMenu();
+        var ordinal = state.Calendar.now.ordinal;
+        var nowdate = getDate(ordinal).split(',');
+        var month = nowdate[0];
+        var day = nowdate[1];
+        var start = state.Calendar.now.startdate.split(',');
+        var startdate = start[1]+' '+start[0]+', '+start[2];
+        
+        sendChat('Kalender', '/w gm <div ' + divstyle + '>' + //--
+            '<div ' + headstyle + '>Kalender</div>' + //--
+            '<div ' + substyle + '>Menu (v.' + state.Calendar.now.version + ')</div>' + //--
+            '<div ' + arrowstyle + '></div>' + //--
+            '<table>' + //--
+            '<tr><td>World: </td><td>' + world + '</a></td></tr>' + //--
+            '<tr><td>Start Date: </td><td><a ' + astyle1 + '" href="!startdate,?{Day},?{Month},?{Year}">' + startdate + '</a></td></tr>' + //--
+            '<tr><td>Day: </td><td><a ' + astyle1 + '" href="!setday,?{Day?|1},' + month +'">' + day + '</a></td></tr>' + //--
+            '<tr><td>Month: </td><td><a ' + astyle1 + '" href="!setmonth,' + day + moMenu + month + '</a></td></tr>' + //--
+            '<tr><td>Year: </td><td><a ' + astyle1 + '" href="!setyear,?{Year?|1486}">' + state.Calendar.now.year + '</a></td></tr>' + //--
+            //'<tr><td>Ordinal: </td><td><a ' + astyle1 + '" href="!setordinal,?{Ordinal?|1}">' + ordinal + '</a></td></tr>' + //-
+            '</table>' + //--
+            '<div style="text-align:center;"><a ' + astyle2 + '" href="!cal">Main Menu</a></div>' + //--
+            '</div>'
+        );
+    },
+
+    showcal = function(msg) {
+        var ordinal = state.Calendar.now.ordinal;
+        var nowdate = getDate(ordinal).split(',');
+        var month = nowdate[0];
+        var day = nowdate[1];
+        var world = "Mundana";
+        
+        var colour = '#7E2D40';
+        var divstyle = 'style="width: 189px; border: 1px solid black; background-color: #ffffff; padding: 5px;"'
+        var tablestyle = 'style="text-align:center; table-layout: auto; width: 170px;"';
+        var arrowstyle = 'style="border: none; border-top: 3px solid transparent; border-bottom: 3px solid transparent; border-left: 195px solid ' + colour + '; margin-bottom: 2px; margin-top: 2px;"';
+        var headstyle = 'style="color: ' + colour + '; font-size: 18px; text-align: left; font-variant: small-caps; font-family: Times, serif;"';
+        var substyle = 'style="font-size: 11px; line-height: 13px; margin-top: -3px; font-style: italic;"';
+        var moon = '<table '+tablestyle+'>'+getMundanaMoon()+'</table>';
+        
+        
+        sendChat(msg.who, '<div ' + divstyle + '>' + //--
+            '<div ' + headstyle + '>Kalender</div>' + //--
+            '<div ' + substyle + '>' + world + '</div>' + //--
+            '<div ' + arrowstyle + '></div>' + //--
+            month + ' ' + day + ', ' + state.Calendar.now.year + //--
+            moon + //--
+            '<br>Today\'s weather:<br>' + state.Calendar.now.weather
+        );
+    },
+
+    getMoMenu = function() {
+        var moMenu = ',?{Month|Mörkerviste|Långsnö|Frostfall|Vårkomstdagen|Vattensvall|Blomsterkomst|Gröngräs|Midsommardagen|Högsol|Skördevärv|Sommaränd|Lövfäll|Bittervind|Vinterkomstdagen|Midvinter}">';
+        return moMenu;
+    },
+
+    getDate = function(options){
+        var day = Number(options);
+        var date;
+        var month;
+        
+        if(day>0 && day<=31){
+            month="Mörkerviste"; 
+            date=day;
+        }else if(day>31 && day<=59){
+            month="Långsnö"; 
+            date=day-31;
+        }else if(day>59 && day<=90){
+            month="Frostfall";
+            date=day-59;
+        }else if(day==91){
+            month="Vårkomstdagen";
+            date='festival';
+        }else if(day>91 && day<=121){
+            month="Vattensvall";
+            date=day-91;
+        }else if(day>121 && day<=152){
+            month="Blomsterkomst";
+            date=day-121;
+        }else if(day>152 && day<=182){
+            month="Gröngräs";
+            date=day-152;
+        }else if(day==183){
+            month="Midsommardagen";
+            date='festival';
+        }else if(day>183 && day<=214){
+            month="Högsol"
+            date=day-183;
+        }else if(day>214 && day<=245){
+            month="Skördevärv";
+            date=day-214;
+        }else if(day>245 && day<=275){
+            month="Sommaränd";
+            date=day-245;
+        }else if(day>275 && day<=306){
+            month="Lövfäll";
+            date=day-275;
+        }else if(day>306 && day<=336){
+            month="Bittervind";
+            date=day-306;
+        }else if(day==337){
+            month="Vinterkomstdagen";
+            date='festival';
+        }else if(day>337 && day<=368){
+            month="Midvinter";
+            date=day-337;
+        }else{
+            month="Mörkerviste";
+            date='1';
+        }
+
+        var array=month+','+String(date);
+        return array; 
+    },
+
+    getOrdinal = function(options){
+        var args = options.content.split(",");
+        var date = args[1];
+        var month = args[2];
+        var ordinal = state.Calendar.now.ordinal;
+        
+        if(date == 'festival'){
+            date = 1;
+        }else{
+            date = Number(args[1]);
+        }
+        
+    switch(month) {
+        case 'Mörkerviste':
+            ordinal = date;
+            break;
+        case 'Långsnö':
+            ordinal = 31+date;
+            break;
+        case 'Frostfall':
+            ordinal = 59+date;
+            break;
+        case 'Vårkomstdagen':
+            ordinal = 91;
+            break;
+        case 'Vattensvall':
+            ordinal = 91+date;
+            break;
+        case 'Blomsterkomst':
+            ordinal = 121+date;
+            break;
+        case 'Gröngräs':
+            ordinal = 152+date;
+            break;
+        case 'Midsommardagen':
+            ordinal = 183;
+            break;
+        case 'Högsol':
+            ordinal = 183+date;
+            break;
+        case 'Skördevärv':
+            ordinal = 214+date;
+            break;
+        case 'Sommaränd':
+            ordinal = 245+date;
+            break;
+        case 'Lövfäll':
+            ordinal = 275+date;
+            break;
+        case 'Bittervind':
+            ordinal = 306+date;
+            break;
+        case 'Vinterkomstdagen':
+            ordinal = 337;
+            break;
+        case 'Midvinter':
+            ordinal = 337+date;
+            break;
+        }
+        state.Calendar.now.ordinal = ordinal;
+    },
+
+    addday = function(no){
+        var days = Number(no);
+        var ordinal = Number(state.Calendar.now.ordinal);
+        var newordinal = ordinal+days;
+        
+        
+        if(newordinal>368){
+            state.Calendar.now.ordinal=newordinal-368;
+            state.Calendar.now.year = Number(state.Calendar.now.year)+1;
+        }else{
+            state.Calendar.now.ordinal = newordinal;
+        }
+    },
+    
+    getsuffix = function(day) {
+        var date = day;
+        var suffix;
+        
+        if (date == 'festival'){
+            suffix = '';
+        }else if (date == 1 || date == 2 || date == 21 || date == 22 || date == 31 ){
+            suffix = ':a';
+        }else{
+            suffix = ':e';
+        }
+        return suffix;
+    },
+    
+    weather = function() {
+        var roll;
+        var temperature;
+        var tempwinterbase;
+        var tempspringbase;
+        var tempsummerbase;
+        var tempautumnbase;
+        var wind;
+        var precipitation;
+        var season;
+        var ordinal = state.Calendar.now.ordinal;
+        
+        if(ordinal > 349 || ordinal <= 75){
+            season = 'Winter'
+        }else if(ordinal <= 166){
+            season = 'Spring'
+        }else if(ordinal <=257 ){
+            season = 'Summer'
+        }else if(ordinal <=349 ){
+            season = 'Fall'
+        }
+        
+        //Lets roll 1d100 to determine the temperature
+        roll = Math.floor(Math.random()*(99));
+        //5% chance it will be a bitterly cold day
+        if(roll>=0 && roll<=4){
+            switch(season) {
+                case 'Winter':
+                    temperature = `Det är en extremt kall vinterdag med en temperatur runt ${Math.floor(Math.random() * 10 - 40)} grader. `;
+                    break;
+                case 'Spring':
+                    temperature = `Det är en extremt kall vårdag med en temperatur runt ${Math.floor(Math.random() * 5 -3)} grader. `;
+                    break;
+                case 'Summer':
+                    temperature = `Det är en extremt kall sommardag med en temperatur runt ${Math.floor(Math.random() * 5 + 9)} grader. `;
+                    break;
+                case 'Fall':
+                    temperature =`Det är en extremt kall höstdag med en temperatur runt ${Math.floor(Math.random() * 5 - 3)} grader. `;
+                    break;
+            }
+        }else if(roll>=5 && roll<=9){
+            //5% chance it will be a very cold day
+            switch(season) {
+                case 'Winter':
+                temperature = `Det är en väldigt kall vinterdag med en temperatur runt ${Math.floor(Math.random() * 5 - 30)} grader. `;
+                break;
+            case 'Spring':
+                temperature = `Det är en väldigt kall vårdag med en temperatur runt ${Math.floor(Math.random() * 5 + 1)} grader. `;
+                break;
+            case 'Summer':
+                temperature = `Det är en väldigt kall sommardag med en temperatur runt ${Math.floor(Math.random() * 5 + 12)} grader. `;
+                break;
+            case 'Fall':
+                temperature = `Det är en väldigt kall höstdag med en temperatur runt ${Math.floor(Math.random() * 5 + 0)} grader. `;
+                break;
+            }
+        }else if(roll>=10 && roll<=19){
+            //10% chance it will be a cold day
+            switch(season) {
+                case 'Winter':
+                    temperature = `Det är en kall vinterdag med en temperatur runt ${Math.floor(Math.random() * 5 - 25)} grader. `;
+                    break;
+                case 'Spring':
+                    temperature = `Det är en kall vårdag med en temperatur runt ${Math.floor(Math.random() * 5 + 4)} grader. `;
+                    break;
+                case 'Summer':
+                    temperature = `Det är en kall sommardag med en temperatur runt ${Math.floor(Math.random() * 5 + 15)} grader. `;
+                    break;
+                case 'Fall':
+                    temperature = `Det är en kall höstdag med en temperatur runt ${Math.floor(Math.random() * 5 + 3)} grader. `;
+                    break;
+            }
+        }else if(roll>=20 && roll<=79){
+            //60% chance of a mild and normal day
+            switch(season) {
+                case 'Winter':
+                    temperature = `Det är en mild vinterdag med en temperatur runt ${Math.floor(Math.random() * 10 - 20)} grader.`;
+                    break;
+                case 'Spring':
+                    temperature = `Det är en mild vårdag med en temperatur runt ${Math.floor(Math.random() * 10 + 8)} grader. `;
+                    break;
+                case 'Summer':
+                    temperature = `Det är en mild sommardag med en temperatur runt ${Math.floor(Math.random() * 10 + 15)} grader. `;
+                    break;
+                case 'Fall':
+                    temperature = `Det är en mild höstdag med en temperatur runt ${Math.floor(Math.random() * 10 + 8)} grader. `;
+                    break;
+            }
+        }else if(roll>=80 && roll<=89){
+            //10% chance of a warm day
+            switch(season) {
+                case 'Winter':
+                    temperature = `Det är en varm vinterdag med en temperatur runt ${Math.floor(Math.random() * 10 - 15)} grader.`;
+                    break;
+                case 'Spring':
+                    temperature = `Det är en varm vårdag med en temperatur runt ${Math.floor(Math.random() * 10 + 10)} grader. `;
+                    break;
+                case 'Summer':
+                    temperature = `Det är en varm sommardag med en temperatur runt ${Math.floor(Math.random() * 10 + 20)} grader. `;
+                    break;
+                case 'Fall':
+                    temperature = `Det är en varm höstdag med en temperatur runt ${Math.floor(Math.random() * 10 + 10)} grader. `;
+                    break;
+            }
+        }else if(roll>=90 && roll<=94){
+            //5% chance of a very warm day
+            switch(season) {
+                case 'Winter':
+                    temperature = `Det är en väldigt varm vinterdag med en temperatur runt ${Math.floor(Math.random() * 10 - 10)} grader.`;
+                    break;
+                case 'Spring':
+                    temperature = `Det är en väldigt varm vårdag med en temperatur runt ${Math.floor(Math.random() * 10 + 13)} grader. `;
+                    break;
+                case 'Summer':
+                    temperature = `Det är en väldigt varm sommardag med en temperatur runt ${Math.floor(Math.random() * 10 + 25)} grader. `;
+                    break;
+                case 'Fall':
+                    temperature = `Det är en väldigt varm höstdag med en temperatur runt ${Math.floor(Math.random() * 10 + 13)} grader. `;
+                    break;
+            }
+        }else{
+            //5% chance of an extremely hot day
+            switch(season) {
+                case 'Winter':
+                    temperature = `Det är en extremnt varm vinterdag med en temperatur runt ${Math.floor(Math.random() * 10 - 5)} grader.`;
+                    break;
+                case 'Spring':
+                    temperature = `Det är en extremnt varm vårdag med en temperatur runt ${Math.floor(Math.random() * 10 + 15)} grader. `;
+                    break;
+                case 'Summer':
+                    temperature = `Det är en extremnt varm sommardag med en temperatur runt ${Math.floor(Math.random() * 10 + 30)} grader. `;
+                    break;
+                case 'Fall':
+                    temperature = `Det är en extremnt varm höstdag med en temperatur runt ${Math.floor(Math.random() * 10 + 15)} grader. `;
+                    break;
+            }
+        }
+        
+        //Ok lets do 1d100 for wind
+		roll = Math.floor(Math.random()*(99));
+		if(roll>=0 && roll<=9){
+			wind='Det är vindstilla och ';
+		}else if(roll>=10 && roll<=29){
+			wind='Vinden blåser med en svag bris och ';
+		}else if(roll>=30 && roll<=49){
+			wind='En bris blåser milt och ';
+		}else if(roll>=50 && roll<=69){
+			wind='En måttlig vind blåser och ';
+		}else if(roll>=70 && roll<=89){
+			wind='En frisk vind tilltar och ';
+		}else if(roll>=90 && roll<=95){
+			wind='En hård vind drar fram och ';
+		}else if(roll=96){
+			wind='Lokala stormbyar drar in över lander och ';
+		}else if(roll=97){
+			wind='En storm är annalkande i horisonten och ';
+		}else if(roll=98){
+			wind='En orkan börjar bildas i horisonten och ';
+		}else {
+			wind='Luften känns elektrisk, huvudet värker, en magistorm är på väg och ';
+		}
+			
+		//Lets check if there is some precipitation
+		roll = Math.floor(Math.random()*(99));
+		if(roll>=0 && roll<=14){
+			precipitation="Light rain or snow.";
+			
+			if(season=='Winter'){
+			    precipitation = 'molnen lyser med sin frånvaro.';
+			}else{
+			    precipitation = 'det är en klarblå himmel.';
+			}
+		}else if(roll>=15 && roll<=39){
+			if(season=='Winter'){
+			    precipitation = 'på himmelen syns vita moln.';
+			}else{
+			    precipitation = 'på himmelen syns vita moln.';
+			}
+		}else if(roll>=40 && roll<=54){
+			if(season=='Winter'){
+			    precipitation = 'himmelen täcks av mörka moln som spricker upp emellanåt.';
+			}else{
+				precipitation = 'himmelen täcks av mörka moln som spricker upp emellanåt.';
+			}
+		}else if(roll>=55 && roll<=59){
+			if(season=='Winter'){
+			    precipitation = 'enstaka snöflingor dalar sakta mot marken.';
+			}else{
+			    precipitation = 'ett lätt duggregn börjar sakta falla.';
+			}
+		}else if(roll>=60 && roll<=69){
+			if(season=='Winter'){
+			    precipitation = 'små snöflingor virvlar i luften.';
+			}else{
+				precipitation = 'spridda regnskurar faller under några timmar.';
+			}
+		}else if(roll>=70 && roll<=79){
+			if(season=='Winter'){
+		    	precipitation = 'snön börjar falla.';
+			}else{
+				precipitation = 'ett lätt regn strilar ner mot marken.';
+			}
+		}else if(roll>=80 && roll<=85){
+			if(season=='Winter'){
+			    precipitation = 'i horisonten syns ett snöväder dra in.';
+			}else{
+				precipitation = 'i horisonten syns ett regnväder dra in med mörka moln.';
+			}
+		}else if(roll>=86 && roll<=91){
+			if(season=='Winter'){
+			    precipitation = 'snön börjar falla tungt.';
+			}else{
+				precipitation = 'ett ösregn börjar falla från en mörk himmel.';
+			}
+		}else if(roll>=92 && roll<=93){
+			if(season=='Winter'){
+			    precipitation = 'snön faller tungt från tjocka moln på himmelen.';
+			}else{
+				precipitation = 'ett ösregn börjar falla från en mörk himmel, på avstånd hörs en lätt åska närma sig.';
+			}
+		}else if(roll>=94 && roll<=95){
+            if(season=='Winter'){
+                precipitation = 'snön faller tungt från mörka, tunga moln på himmelen.';
+            }else{
+			    precipitation = 'ett ösregn börjar falla från en mörk himmel, på avstånd hörs en rejäl åska närma sig.';
+			}
+		}else if(roll>=96 && roll<=97){
+			if(season=='Winter'){
+			    precipitation = 'snön faller intensivt från himmelen. Begränsad sikt och framkomlighet.';
+			}else{
+			    precipitation = 'himmelen öppnar upp sig i ett skyfall. Inom kort har bäckar och floder svämmat över. Begränsad framkomlighet.';
+			}
+		}else{
+            if(season=='Winter'){
+                precipitation = 'snön faller intensivt från himmelen. Begränsad sikt och framkomlighet.';
+			}else{
+				precipitation = 'himmelen öppnar upp sig i ett skyfall följt av intensiv åska. Inom kort har bäckar och floder svämmat över. Begränsad framkomlighet.';
+			}
+		}
+        
+        var forecast=temperature+wind+precipitation;
+        state.Calendar.now.weather = forecast;
+    },
+
+    getMundanaMoon = function() {
+        var ordinal = Number(state.Calendar.now.ordinal);
+        var tristianaArray = '0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16';
+        var izagardArray = '0,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16,1,2,3,3,4,5,5,6,7,7,8,9,10,11,11,12,13,13,14,15,15,16,16';
+        var tristianaNO = tristianaArray.split(",");
+        var tristianaImg = tristianaNO[ordinal];
+        var tristiana = getMoon(tristianaImg);
+        var izagardNO = izagardArray.split(",");
+        var izagardImg = izagardNO[ordinal];
+        var izagard = getMoon(izagardImg);
+        var moon = '<tr><td><img src="'+tristiana+'" style="width:40px;height:40px;"></td><td><img src="'+izagard+'" style="width:30px;height:30px;"></td></tr><tr><td>Tristiana</td><td>Izagard</td></tr>';
+        return moon;
+    },
+
+    getMoon = function(moonNo) {
+        var args = moonNo;
+        var moon;
+        switch(args) {
+            case '1':
+                // moon = 'Full Moon';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/Twemoji_1f315.svg/512px-Twemoji_1f315.svg.png';
+                break;
+            case '2':
+                // moon = 'Waning Gibbous';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Twemoji_1f316.svg/512px-Twemoji_1f316.svg.png';
+                break;
+            case '3':
+                // moon = 'Waning Gibbous';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Twemoji_1f316.svg/512px-Twemoji_1f316.svg.png';
+                break;
+            case '4':
+                // moon = 'Waning Gibbous';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/de/Twemoji_1f316.svg/512px-Twemoji_1f316.svg.png';
+                break;
+            case '5':
+                // moon = 'Last Quarter';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/67/Twemoji_1f317.svg/512px-Twemoji_1f317.svg.png';
+                break;
+            case '6':
+                // moon = 'Waning Crescent';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/Twemoji_1f318.svg/512px-Twemoji_1f318.svg.png';
+                break;
+            case '7':
+                // moon = 'Waning Crescent';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/Twemoji_1f318.svg/512px-Twemoji_1f318.svg.png';
+                break;
+            case '8':
+                // moon = 'Waning Crescent';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/Twemoji_1f318.svg/512px-Twemoji_1f318.svg.png';
+                break;
+            case '9':
+                // moon = 'New Moon';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Twemoji_1f311.svg/512px-Twemoji_1f311.svg.png';
+                break;
+            case '10':
+                // moon = 'Waxing Crescent';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Twemoji_1f312.svg/512px-Twemoji_1f312.svg.png';
+                break;
+            case '11':
+                // moon = 'Waxing Crescent';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Twemoji_1f312.svg/512px-Twemoji_1f312.svg.png';
+                break;
+            case '12':
+                // moon = 'Waxing Crescent';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Twemoji_1f312.svg/512px-Twemoji_1f312.svg.png';
+                break;
+            case '13':
+                // moon = 'First Quarter';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/Twemoji_1f313.svg/512px-Twemoji_1f313.svg.png';
+                break;
+            case '14':
+                // moon = 'Waxing Gibbous';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1c/Twemoji_1f314.svg/512px-Twemoji_1f314.svg.png';
+                break;
+            case '15':
+                // moon = 'Waxing Gibbous';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1c/Twemoji_1f314.svg/512px-Twemoji_1f314.svg.png';
+                break;
+            case '16':
+                // moon = 'Waxing Gibbous';
+                moon = 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/1c/Twemoji_1f314.svg/512px-Twemoji_1f314.svg.png';
+                break;
+        }
+        return moon;
+    },
+
+    createHandout = function() {
+    	var handout = createObj('handout',{
+			name: handoutName
+		});
+        return handout;
+	},
+
+    getHandout = function() {
+		var handout = filterObjs(function(o){
+			return ( 'handout' === o.get('type') && handoutName === o.get('name') && false === o.get('archived'));
+		})[0];
+		
+		if(handout) {
+			return handout;
+		} 
+		
+        return createHandout();
+    },
+
+    log = function(msg) {
+        var args = msg.content.split(",");
+        var text = args[1];
+        var handout = getHandout();
+        var ordinal = state.Calendar.now.ordinal;
+        
+        var nowdate = getDate(ordinal).split(',');
+        var month = nowdate[0];
+        var day = nowdate[1];
+        var suffix = getsuffix(day);
+        var year = state.Calendar.now.year;
+        var date = day + suffix + " " + month + ", " + year;
+        
+        handout.get('notes', function(nts) {
+            
+            if(!_.isNull(nts)){
+                setTimeout(function(){
+                    var newtext = nts + "<br>" + date + " - " + text;
+                    handout.set('notes', newtext);                      
+                },0);
+            }
+            
+            setTimeout(function(){},0);
+        });
+        
+        sendChat('Calendar','/w gm A new note has been added to the Events Log handout.');
+    },
+    
+    checkInstall = function() {
+        if(typeof state.Calendar == "undefined"){
+            setDefaults();
+        }
+        
+        if ( state.Calendar.now.version != version ){
+            checkDefaults();
+        }
+    },
+    
+    registerEventHandlers = function() {
+        on('chat:message', handleInput);
+	};
+
+	return {
+	    CheckInstall: checkInstall,
+		RegisterEventHandlers: registerEventHandlers
+	};
+	
+}());
+
+on("ready",function(){
+	'use strict';
+	Calendar.CheckInstall();
+	Calendar.RegisterEventHandlers();
+});
